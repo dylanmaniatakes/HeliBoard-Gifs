@@ -379,6 +379,7 @@
     <string name="redo" tools:keep="@string/redo">Redo</string>
     <string name="close_history" tools:keep="@string/close_history">Close clipboard history</string>
     <string name="emoji" tools:keep="@string/emoji">Emoji</string>
+    <string name="gif" tools:keep="@string/gif">GIF</string>
     <string name="floating" tools:keep="@string/floating">Floating Keyboard</string>
     <!-- Title of the setting to set clipboard toolbar keys -->
     <string name="clipboard_toolbar_keys">Select clipboard toolbar keys</string>
@@ -1322,4 +1323,21 @@ New dictionary:
     <string name="gesture_data_swipe_o_scope">Tool for visualizing gesture data: &lt;a href=%s&gt;Swipe-O-Scope&lt;/a&gt;</string>
 
     <!-- new strings should go above the section for gesture data gathering -->
+    <!-- Button description to clear GIF search text -->
+    <string name="clear_text">Clear text</string>
+    <string name="enable_tenor_search">Enable Klipy GIF search</string>
+    <string name="enter_tenor_api_key">Enter Klipy API key</string>
+    <string name="get_tenor_api_key">Get an API key</string>
+    <string name="tenor_warning_no_key">Klipy API key required to search GIFs</string>
+    <string name="unable_to_open_link">Cannot open link</string>
+    <string name="settings_screen_gif_tenor">GIF (Klipy)</string>
+    <!-- Header for Klipy GIF settings page -->
+    <string name="tenor_gif_options">Klipy GIF Options</string>
+    <!-- GIF share size preference strings -->
+    <string name="gif_share_size">GIF Share Size</string>
+    <string name="gif_share_size_auto">Auto (fit MMS)</string>
+    <string name="gif_share_size_tiny">Tiny GIF</string>
+    <string name="gif_share_size_medium">Medium GIF</string>
+    <string name="gif_share_size_original">Original GIF</string>
+
 </resources>

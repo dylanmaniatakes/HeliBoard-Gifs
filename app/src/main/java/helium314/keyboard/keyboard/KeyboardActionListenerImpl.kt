@@ -20,9 +20,12 @@ import helium314.keyboard.latin.AudioAndHapticFeedbackManager
 import helium314.keyboard.latin.EmojiAltPhysicalKeyDetector
 import helium314.keyboard.latin.LatinIME
 import helium314.keyboard.latin.RichInputMethodManager
+import helium314.keyboard.latin.R
+import helium314.keyboard.keyboard.emoji.GifSearchView
 import helium314.keyboard.latin.common.Constants
 import helium314.keyboard.latin.common.InputPointers
 import helium314.keyboard.latin.common.WordBreakIterator
+import android.view.View
 import helium314.keyboard.latin.common.combiningRange
 import helium314.keyboard.latin.common.stepsToCharCount
 import helium314.keyboard.latin.inputlogic.InputLogic
@@ -104,7 +107,39 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     }
 
     override fun onCodeInput(primaryCode: Int, x: Int, y: Int, isKeyRepeat: Boolean) {
+        // Intercept key events for GIF search query editing
+        if (latinIME.isGifSearchActive()) {
+            when (primaryCode) {
+                KeyCode.DELETE -> {
+                    latinIME.deleteGifSearchChar()
+                    return
+                }
+                KeyCode.SHIFT_ENTER, Constants.CODE_ENTER -> {
+                    // Trigger GIF search via the search view
+                    val rootView = keyboardSwitcher.wrapperView?.rootView
+                    val gifView = rootView?.findViewById<GifSearchView>(R.id.gif_search_view)
+                    gifView?.let { it.performSearch(it.getQueryField().text.toString()) }
+                    return
+                }
+                KeyCode.EMOJI -> latinIME.setUiMode(LatinIME.UiMode.EMOJI)
+                KeyCode.ALPHA -> latinIME.setUiMode(LatinIME.UiMode.KEYS)
+                KeyCode.SYMBOL, KeyCode.SYMBOL_ALPHA, KeyCode.NUMPAD, KeyCode.SHIFT, KeyCode.CAPS_LOCK -> {
+                    return
+                }
+                else -> {
+                    if (primaryCode > 0 && Character.isValidCodePoint(primaryCode)) {
+                        latinIME.appendGifSearchCodePoint(primaryCode)
+                    }
+                    return
+                }
+            }
+        }
         when (primaryCode) {
+            KeyCode.GIF -> {
+                // dedicated GIF toolbar key: open the GIF search panel
+                latinIME.setUiMode(LatinIME.UiMode.GIF)
+                return
+            }
             KeyCode.TOGGLE_AUTOCORRECT -> return settings.toggleAutoCorrect()
             KeyCode.TOGGLE_INCOGNITO_MODE -> {
                 settings.toggleAlwaysIncognitoMode()
@@ -154,7 +189,13 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
         metaAfterCodeInput(primaryCode)
     }
 
-    override fun onTextInput(text: String?) = latinIME.onTextInput(text)
+    override fun onTextInput(text: String?) {
+        if (latinIME.isGifSearchActive()) {
+            latinIME.appendGifSearchText(text)
+            return
+        }
+        latinIME.onTextInput(text)
+    }
 
     override fun onContent(content: InputContentInfoCompat) {
         val editorInfo = latinIME.currentInputEditorInfo

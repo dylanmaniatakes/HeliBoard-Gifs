@@ -49,6 +49,8 @@ import helium314.keyboard.latin.common.ColorType;
 import helium314.keyboard.latin.common.Colors;
 import helium314.keyboard.latin.settings.Settings;
 import helium314.keyboard.latin.settings.SettingsValues;
+import android.content.ContextWrapper;
+import helium314.keyboard.latin.LatinIME;
 import helium314.keyboard.latin.utils.ResourceUtils;
 
 import static helium314.keyboard.latin.common.Constants.NOT_A_COORDINATE;
@@ -197,6 +199,8 @@ public final class EmojiPalettesView extends LinearLayout
     private KeyboardActionListener mKeyboardActionListener = KeyboardActionListener.EMPTY_LISTENER;
     private final EmojiCategory mEmojiCategory;
     private ViewPager2 mPager;
+    private View mGifSearchView;
+    private ImageView mGifTab;
 
     public EmojiPalettesView(final Context context, final AttributeSet attrs) {
         this(context, attrs, R.attr.emojiPalettesViewStyle);
@@ -226,8 +230,17 @@ public final class EmojiPalettesView extends LinearLayout
         // The main keyboard expands to the entire this {@link KeyboardView}.
         final int width = ResourceUtils.getKeyboardWidth(getContext(), Settings.getValues())
                 + getPaddingLeft() + getPaddingRight();
-        final int height = ResourceUtils.getSecondaryKeyboardHeight(res, Settings.getValues())
-                + getPaddingTop() + getPaddingBottom();
+        int height;
+        // When GIF search is active, only occupy a small panel above the main keys so the
+        // keyboard remains visible for typing into the query field programmatically.
+        if (mGifSearchView != null && mGifSearchView.getVisibility() == View.VISIBLE) {
+            final int strip = res.getDimensionPixelSize(R.dimen.config_suggestions_strip_height);
+            // Show search row + a few rows of results; adjust factor if needed.
+            height = strip * 4 + getPaddingTop() + getPaddingBottom();
+        } else {
+            height = ResourceUtils.getSecondaryKeyboardHeight(res, Settings.getValues())
+                    + getPaddingTop() + getPaddingBottom();
+        }
         mEmojiCategoryPageIndicatorView.mWidth = width;
         setMeasuredDimension(width, height);
     }
@@ -262,10 +275,30 @@ public final class EmojiPalettesView extends LinearLayout
             for (EmojiCategory.CategoryProperties properties : mEmojiCategory.getShownCategories()) {
                 addTab(mTabStrip, properties.getCategory());
             }
+            // Always add GIF tab, visibility will reflect preference and API key
+            android.content.Context ctx = getContext();
+            mGifTab = new ImageView(ctx);
+            mColors.setBackground(mGifTab, ColorType.STRIP_BACKGROUND);
+            mColors.setColor(mGifTab, ColorType.EMOJI_CATEGORY);
+            mGifTab.setScaleType(ImageView.ScaleType.CENTER);
+            mGifTab.setImageResource(R.drawable.ic_emoji_gif);
+            mGifTab.setContentDescription(ctx.getString(R.string.spoken_description_emoji_category_gif));
+            mGifTab.setTag("GIF");
+            mTabStrip.addView(mGifTab);
+            mGifTab.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+            mGifTab.setOnClickListener(this);
+            // Initial visibility based on Klipy settings
+            String apiKey = helium314.keyboard.latin.GifPrefs.getStoredApiKey(ctx);
+            boolean showGif = helium314.keyboard.latin.GifPrefs.isKlipyEnabled(ctx)
+                    && apiKey != null && !apiKey.trim().isEmpty();
+            mGifTab.setVisibility(showGif ? View.VISIBLE : View.GONE);
         }
 
         mPager = findViewById(R.id.emoji_pager);
         mPager.setAdapter(new PagerAdapter(mPager));
+        // initialize GIF search view
+        // The GIF search view is placed above the keyboard in the layout hierarchy
+        mGifSearchView = getRootView().findViewById(R.id.gif_search_view);
         mEmojiLayoutParams.setEmojiListProperties(mPager);
         mEmojiCategoryPageIndicatorView = findViewById(R.id.emoji_category_page_id_view);
         mEmojiLayoutParams.setCategoryPageIdViewProperties(mEmojiCategoryPageIndicatorView);
@@ -279,11 +312,44 @@ public final class EmojiPalettesView extends LinearLayout
      * interface to handle non-canceled touch-up events from View-based elements such as the space
      * bar.
      */
+    /** Find the {@link LatinIME} service instance from the context chain (for UI-mode switching). */
+    private LatinIME getLatinIME() {
+        Context c = getContext();
+        int guard = 0;
+        while (c != null && guard < 10) {
+            if (c instanceof LatinIME) return (LatinIME) c;
+            if (!(c instanceof ContextWrapper)) return null;
+            c = ((ContextWrapper) c).getBaseContext();
+            guard++;
+        }
+        return null;
+    }
+
+    /**
+     * Called when a category or the GIF tab is clicked.
+     */
     @Override
     public void onClick(View v) {
         final Object tag = v.getTag();
-        if (tag instanceof EmojiCategory.Category category) {
+        if (tag instanceof String && "GIF".equals(tag)) {
             AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS);
+            LatinIME ime = getLatinIME();
+            if (ime == null) return;
+            if (mGifTab != null) {
+                mColors.setColor(mGifTab, ColorType.EMOJI_CATEGORY_SELECTED);
+            }
+            for (EmojiCategory.CategoryProperties properties : mEmojiCategory.getShownCategories()) {
+                View tab = mTabStrip.findViewWithTag(properties.getCategory());
+                if (tab instanceof ImageView) {
+                    mColors.setColor((ImageView) tab, ColorType.EMOJI_CATEGORY);
+                }
+            }
+            ime.setUiMode(LatinIME.UiMode.GIF);
+        } else if (tag instanceof EmojiCategory.Category category) {
+            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS);
+            if (mGifTab != null) {
+                mColors.setColor(mGifTab, ColorType.EMOJI_CATEGORY);
+            }
             if (category != mEmojiCategory.getCurrentCategory()) {
                 setCurrentCategory(category, false);
                 updateEmojiCategoryPageIdView();
@@ -359,6 +425,14 @@ public final class EmojiPalettesView extends LinearLayout
     public void startEmojiPalettes(final KeyVisualAttributes keyVisualAttr,
                final EditorInfo editorInfo, final KeyboardActionListener keyboardActionListener) {
         initialize();
+        // Adjust GIF tab visibility based on preference and API key
+        if (mGifTab != null) {
+            android.content.Context ctx = getContext();
+            String apiKey = helium314.keyboard.latin.GifPrefs.getStoredApiKey(ctx);
+            boolean showGif = helium314.keyboard.latin.GifPrefs.isKlipyEnabled(ctx)
+                    && apiKey != null && !apiKey.trim().isEmpty();
+            mGifTab.setVisibility(showGif ? View.VISIBLE : View.GONE);
+        }
 
         setupBottomRowKeyboard(editorInfo, keyboardActionListener);
         final KeyDrawParams params = new KeyDrawParams();

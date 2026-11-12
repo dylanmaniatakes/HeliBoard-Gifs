@@ -19,6 +19,8 @@ import android.os.Debug;
 import android.os.Message;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewGroup.LayoutParams;
 import android.view.Window;
 import android.view.inputmethod.CompletionInfo;
 import android.view.inputmethod.EditorInfo;
@@ -38,6 +40,7 @@ import helium314.keyboard.keyboard.emoji.EmojiPalettesView;
 import helium314.keyboard.keyboard.emoji.EmojiSearchActivity;
 import helium314.keyboard.keyboard.emoji.EmojiSearchActivityKt;
 import helium314.keyboard.keyboard.internal.KeyboardIconsSet;
+import helium314.keyboard.keyboard.emoji.GifSearchView;
 import helium314.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode;
 import helium314.keyboard.event.Event;
 import helium314.keyboard.event.InputTransaction;
@@ -671,9 +674,13 @@ public class LatinIME extends InputMethodService implements
         return mKeyboardSwitcher.onCreateInputView(KtxKt.getDisplayContext(this), mIsHardwareAcceleratedDrawingEnabled);
     }
 
+    /** Reference to the current input view, used by the GIF panel helpers (getInputView() is not API 37-visible). */
+    private View mGifInputView;
+
     @Override
     public void setInputView(final View view) {
         super.setInputView(view);
+        mGifInputView = view;
         // updateSoftInputWindowLayoutParameters needs to happen after setInputView
         mKeyboardSwitcher.updateSoftInputWindowLayoutParameters();
         updateSuggestionStripView(view);
@@ -687,6 +694,25 @@ public class LatinIME extends InputMethodService implements
             mSuggestionStripView.setRtl(mRichImm.getCurrentSubtype().isRtlSubtype());
             mSuggestionStripView.setListener(this, view);
         }
+        // Wire GIF search view listener for cascading full-height panel behavior
+        GifSearchView gifSearchView = view.findViewById(R.id.gif_search_view);
+        if (gifSearchView != null) {
+            gifSearchView.setActionsListener(new GifSearchView.GifActionsListener() {
+                @Override public void onGifInsertCompleted() {
+                    // Return to keys after insert
+                    setUiMode(UiMode.KEYS);
+                }
+                @Override public void onGifResultsVisible() {
+                    // Enter GIF mode when results appear
+                    setUiMode(UiMode.GIF);
+                }
+                @Override public void onGifEditingStateChanged(boolean wantsKeysVisible) {
+                    // Show or hide keys while in GIF mode
+                    gifWantsKeysVisible = wantsKeysVisible;
+                    if (uiMode == UiMode.GIF) applyUiMode();
+                }
+            });
+        }
     }
 
     @Override
@@ -697,12 +723,19 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void onStartInput(final EditorInfo editorInfo, final boolean restarting) {
         mHandler.onStartInput(editorInfo, restarting);
+        // Reset UI mode and editing state on starting input
+        uiMode = UiMode.KEYS;
+        gifWantsKeysVisible = true;
     }
 
     @Override
     public void onStartInputView(final EditorInfo editorInfo, final boolean restarting) {
         mHandler.onStartInputView(editorInfo, restarting);
         mStatsUtilsManager.onStartInputView();
+        // Reset to default key mode and editing state on showing input
+        uiMode = UiMode.KEYS;
+        gifWantsKeysVisible = true;
+        applyUiMode();
     }
 
     @Override
@@ -717,6 +750,10 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void onFinishInput() {
         mHandler.onFinishInput();
+        // Collapse panels and reset editing state when input finishes
+        uiMode = UiMode.KEYS;
+        gifWantsKeysVisible = true;
+        applyUiMode();
         BackgroundGatheringCache.saveOrClear(this);
     }
 
@@ -1080,6 +1117,104 @@ public class LatinIME extends InputMethodService implements
         super.onComputeInsets(outInsets);
         mKeyboardSwitcher.updateInsets(outInsets);
     }
+
+    /**
+     * Expand the GIF panel to full IME height, hiding the keyboard keys.
+     */
+    public void showGifResultsFullHeight() {
+        if (mGifInputView == null) return;
+        View panel = mGifInputView.findViewById(R.id.gif_search_view);
+        View keys = mGifInputView.findViewById(R.id.keyboard_view_wrapper);
+        View strip = mGifInputView.findViewById(R.id.strip_container);
+        if (panel != null) {
+            panel.setVisibility(View.VISIBLE);
+            // Expand panel to fill remaining IME height (below strip)
+            View root = getWindow().getWindow().getDecorView();
+            int totalH = (root != null ? root.getHeight() : mGifInputView.getHeight());
+            int stripH = (strip != null && strip.getVisibility() == View.VISIBLE) ? strip.getHeight() : 0;
+            LayoutParams lp = panel.getLayoutParams();
+            lp.height = totalH - stripH;
+            panel.setLayoutParams(lp);
+        }
+        if (keys != null) {
+            keys.setVisibility(View.GONE);
+        }
+    }
+
+    /**
+     * Restore normal keyboard view, showing keys alongside the GIF panel.
+     */
+    public void showKeyboardNormal() {
+        if (mGifInputView == null) return;
+        View panel = mGifInputView.findViewById(R.id.gif_search_view);
+        View keys = mGifInputView.findViewById(R.id.keyboard_view_wrapper);
+        if (panel != null) {
+            // Reset panel to wrap content
+            LayoutParams lp = panel.getLayoutParams();
+            lp.height = LayoutParams.WRAP_CONTENT;
+            panel.setLayoutParams(lp);
+            panel.setVisibility(View.VISIBLE);
+        }
+        if (keys != null) {
+            keys.setVisibility(View.VISIBLE);
+        }
+        View root = getWindow().getWindow().getDecorView();
+        if (root != null) root.requestLayout();
+    }
+
+    /**
+     * Apply the current UI mode, syncing panel, keyboard, and toolbars.
+     */
+    public void applyUiMode() {
+        if (mGifInputView == null) return;
+        View suggestionStrip = mGifInputView.findViewById(R.id.suggestion_strip_view);
+        View emojiTabStrip    = mGifInputView.findViewById(R.id.emoji_tab_strip);
+        View gifSearchView    = mGifInputView.findViewById(R.id.gif_search_view);
+        View mainKeyboard     = mGifInputView.findViewById(R.id.keyboard_view);
+        View emojiPalettes    = mGifInputView.findViewById(R.id.emoji_palettes);
+        switch (uiMode) {
+            case KEYS:
+                if (gifSearchView != null) gifSearchView.setVisibility(View.GONE);
+                if (emojiPalettes != null) emojiPalettes.setVisibility(View.GONE);
+                if (mainKeyboard != null) mainKeyboard.setVisibility(View.VISIBLE);
+                if (suggestionStrip != null) suggestionStrip.setVisibility(View.VISIBLE);
+                if (emojiTabStrip != null) emojiTabStrip.setVisibility(View.GONE);
+                break;
+            case EMOJI:
+                if (gifSearchView != null) gifSearchView.setVisibility(View.GONE);
+                if (emojiPalettes != null) emojiPalettes.setVisibility(View.VISIBLE);
+                if (mainKeyboard != null) mainKeyboard.setVisibility(View.GONE);
+                if (suggestionStrip != null) suggestionStrip.setVisibility(View.GONE);
+                if (emojiTabStrip != null) emojiTabStrip.setVisibility(View.VISIBLE);
+                break;
+            case GIF:
+                if (gifSearchView != null) {
+                    View clipboardPanel = mGifInputView.findViewById(R.id.clipboard_history);
+                    if (clipboardPanel != null) clipboardPanel.setVisibility(View.GONE);
+                    // Adjust panel height: wrap for editing, expand for browsing
+                    View root = getWindow().getWindow().getDecorView();
+                    int totalH = root != null ? root.getHeight() : mGifInputView.getHeight();
+                    int stripH = (suggestionStrip != null && suggestionStrip.getVisibility() == View.VISIBLE)
+                            ? suggestionStrip.getHeight() : 0;
+                    ViewGroup.LayoutParams lp = gifSearchView.getLayoutParams();
+                    if (!gifWantsKeysVisible) {
+                        lp.height = totalH - stripH;
+                    } else {
+                        lp.height = LayoutParams.WRAP_CONTENT;
+                    }
+                    gifSearchView.setLayoutParams(lp);
+                    gifSearchView.setVisibility(View.VISIBLE);
+                }
+                if (emojiPalettes != null) emojiPalettes.setVisibility(View.GONE);
+                if (mainKeyboard != null) mainKeyboard.setVisibility(gifWantsKeysVisible ? View.VISIBLE : View.GONE);
+                if (suggestionStrip != null) suggestionStrip.setVisibility(View.GONE);
+                if (emojiTabStrip != null) emojiTabStrip.setVisibility(View.VISIBLE);
+                break;
+        }
+        View root = getWindow().getWindow().getDecorView();
+        if (root != null) root.requestLayout();
+    }
+
 
     public void startShowingInputView(final boolean needsToLoadKeyboard) {
         mIsExecutingStartShowingInputView = true;
@@ -1497,6 +1632,16 @@ public class LatinIME extends InputMethodService implements
     // Hooks for hardware keyboard
     @Override
     public boolean onKeyDown(final int keyCode, final KeyEvent keyEvent) {
+        // Handle back key to exit full-screen GIF panel
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            View panel = (mGifInputView != null) ? mGifInputView.findViewById(R.id.gif_search_view) : null;
+            View keys = (mGifInputView != null) ? mGifInputView.findViewById(R.id.keyboard_view_wrapper) : null;
+            if (panel != null && panel.getVisibility() == View.VISIBLE
+                    && keys != null && keys.getVisibility() == View.GONE) {
+                showKeyboardNormal();
+                return true;
+            }
+        }
         if (mKeyboardActionListener.onKeyDown(keyCode, keyEvent))
             return true;
         return super.onKeyDown(keyCode, keyEvent);
@@ -1516,6 +1661,20 @@ public class LatinIME extends InputMethodService implements
 
     public ClipboardHistoryManager getClipboardHistoryManager() {
         return mClipboardHistoryManager;
+    }
+    /**
+     * IME UI modes for unified panel/toolbar state.
+     */
+    public enum UiMode { KEYS, EMOJI, GIF }
+    private UiMode uiMode = UiMode.KEYS;
+    // When in GIF mode, whether letter keys should remain visible (editing) or hidden (browsing)
+    private boolean gifWantsKeysVisible = true;
+    /**
+     * Change UI mode and immediately apply it.
+     */
+    public void setUiMode(UiMode mode) {
+        uiMode = mode;
+        applyUiMode();
     }
 
     public void launchSettings() {
@@ -1635,5 +1794,54 @@ public class LatinIME extends InputMethodService implements
         }
         GestureDataGatheringSettings.INSTANCE.showEndNotificationIfNecessary(this); // will do nothing for a long time
         mInputLogic.setFacilitator(mDictionaryFacilitator);
+    }
+
+    /**
+     * Returns true when the GIF search panel is visible.
+     */
+    public boolean isGifSearchActive() {
+        if (mGifInputView == null) return false;
+        View v = mGifInputView.findViewById(R.id.gif_search_view);
+        return v != null && v.getVisibility() == View.VISIBLE;
+    }
+
+    /**
+     * Appends a character to the GIF search query field.
+     */
+    public void appendGifSearchCodePoint(int codePoint) {
+        if (mGifInputView == null) return;
+        View v = mGifInputView.findViewById(R.id.gif_search_view);
+        if (v instanceof GifSearchView) {
+            ((GifSearchView) v).appendQueryCodePoint(codePoint);
+        }
+    }
+
+    /**
+     * Appends text to the GIF search query field.
+     */
+    public void appendGifSearchText(String text) {
+        if (mGifInputView == null) return;
+        View v = mGifInputView.findViewById(R.id.gif_search_view);
+        if (v instanceof GifSearchView) {
+            ((GifSearchView) v).appendQueryText(text);
+        }
+    }
+
+    /**
+     * Appends a character to the GIF search query field.
+     */
+    public void appendGifSearchChar(char c) {
+        appendGifSearchCodePoint(c);
+    }
+
+    /**
+     * Deletes the last character from the GIF search query field.
+     */
+    public void deleteGifSearchChar() {
+        if (mGifInputView == null) return;
+        View v = mGifInputView.findViewById(R.id.gif_search_view);
+        if (v instanceof GifSearchView) {
+            ((GifSearchView) v).deleteLastChar();
+        }
     }
 }

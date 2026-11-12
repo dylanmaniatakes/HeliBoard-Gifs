@@ -17,4 +17,6 @@
     <color name="setup_text_action">#FFFFFFFF</color>
     <color name="action_bar_color">#FF212121</color>
     <color name="navigation_bar_color">#FF303030</color>
+    <color name="gif_search_text">#FFFFFFFF</color>        <!-- white -->
+    <color name="gif_search_hint">#80FFFFFF</color>        <!-- 50% white -->
 </resources>

@@ -1,10 +1,26 @@
 import com.android.build.api.variant.ApplicationVariant
+import java.util.Properties
 
 plugins {
     id("com.android.application")
     kotlin("plugin.serialization") version "2.4.0"
     kotlin("plugin.compose") version "2.4.0"
 }
+
+// KLIPY API key: retrieve from project root local.properties (key=KLIPY_API_KEY).
+// Fall back to TENOR_API_KEY so existing local.properties files keep building.
+val localPropsFile = rootProject.file("local.properties")
+val localProps = Properties()
+if (localPropsFile.exists()) {
+    localPropsFile.reader().use { reader ->
+        localProps.load(reader)
+    }
+}
+// Provide empty string if key is missing
+val klipyKey: String = localProps.getProperty(
+    "KLIPY_API_KEY",
+    localProps.getProperty("TENOR_API_KEY", "")
+)
 
 android {
     compileSdk = 37
@@ -20,6 +36,8 @@ android {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
         }
         proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        buildConfigField("String", "KLIPY_API_KEY", "\"$klipyKey\"")
+        buildConfigField("String", "TENOR_API_KEY", "\"$klipyKey\"")
     }
 
     buildTypes {
@@ -118,6 +136,7 @@ android {
 dependencies {
     // androidx
     implementation("androidx.core:core-ktx:1.17.0") // 1.18.0 requires minSdk 23
+    implementation("androidx.appcompat:appcompat:1.6.1") // GIF settings activity
     implementation("androidx.recyclerview:recyclerview:1.4.0")
     implementation("androidx.autofill:autofill:1.3.0")
     implementation("androidx.viewpager2:viewpager2:1.1.0")
@@ -136,6 +155,9 @@ dependencies {
     implementation("sh.calvin.reorderable:reorderable:3.1.0") // for easier re-ordering
     implementation("com.github.skydoves:colorpicker-compose:1.1.3") // for user-defined colors, newer requires minSdk 23
 
+    // image loading
+    implementation("com.github.bumptech.glide:glide:4.16.0")
+    annotationProcessor("com.github.bumptech.glide:compiler:4.16.0")
     // test
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")

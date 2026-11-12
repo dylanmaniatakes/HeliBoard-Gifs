@@ -10,6 +10,8 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
+// Use fully-qualified android.content.Intent to avoid ambiguous imports
+import helium314.keyboard.latin.TenorSettingsActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
@@ -127,7 +129,12 @@ open class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPre
                     else if (showWelcomeWizard) {
                         WelcomeWizard(close = { showWelcomeWizard = false }, finish = this::finish)
                     } else {
-                        SettingsNavHost(onClickBack = { this.finish() })
+                        SettingsNavHost(
+                            onClickBack = { this.finish() },
+                            onClickGifSettings = { startActivity(
+                                android.content.Intent(this, TenorSettingsActivity::class.java)
+                            ) }
+                        )
                         if (crashReports.isNotEmpty()) {
                             val ctx = LocalContext.current
                             ConfirmationDialog(
@@ -159,7 +166,7 @@ open class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPre
             }
         }
 
-        if (intent?.action == Intent.ACTION_VIEW) {
+        if (intent?.action == android.content.Intent.ACTION_VIEW) {
             intent?.data?.let {
                 cachedDictionaryFile.delete()
                 FileUtils.copyContentUriToNewFile(it, this, cachedDictionaryFile)
